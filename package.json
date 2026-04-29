@@ -1,0 +1,37 @@
+{
+  "name": "dummy-backend-node",
+  "version": "1.0.0",
+  "description": "A small Node.js backend for practicing EC2, Docker, Redis, sockets, and CI/CD deployments.",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "check": "node --check src/server.js && node --check src/app.js && node --check src/config/redis.js && node --check src/sockets/index.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "node",
+    "express",
+    "docker",
+    "redis",
+    "socket.io",
+    "ec2",
+    "ci-cd"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "morgan": "^1.10.0",
+    "redis": "^4.7.0",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
