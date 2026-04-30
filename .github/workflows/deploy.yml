@@ -48,6 +48,10 @@ jobs:
           ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
           IMAGE_TAG: ${{ github.event.inputs.branch }}-${{ github.sha }}
         run: |
+          # Remove accidental spaces/newlines from registry and repository secrets.
+          ECR_REGISTRY=$(printf '%s' "$ECR_REGISTRY" | tr -d '\r\n ')
+          ECR_REPOSITORY=$(printf '%s' "$ECR_REPOSITORY" | tr -d '\r\n ')
+
           # Replace slash in branch names so Docker tags stay valid.
           SAFE_TAG=$(echo "$IMAGE_TAG" | tr '/' '-')
 
@@ -100,6 +104,11 @@ jobs:
           script: |
             # Stop deployment immediately if any command fails.
             set -e
+
+            # Remove accidental spaces or newlines from deployment values.
+            IMAGE_URI=$(printf '%s' "$IMAGE_URI" | tr -d '\r\n ')
+            AWS_REGION=$(printf '%s' "$AWS_REGION" | tr -d '\r\n ')
+            ECR_REGISTRY=$(printf '%s' "$ECR_REGISTRY" | tr -d '\r\n ')
 
             # Create the app deployment directory.
             sudo mkdir -p /opt/dummy-node-backend
