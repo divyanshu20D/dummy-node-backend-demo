@@ -1,50 +1,129 @@
-# name: CI and Deploy
+# Name shown in the GitHub Actions UI.
+name: Deploy to EC2
 
-# on:
-#   push:
-#     branches:
-#       - main
-#   pull_request:
-#     branches:
-#       - main
+# Run this workflow manually only.
+on:
+  workflow_dispatch:
+    inputs:
+      # Branch name selected manually before deployment.
+      branch:
+        description: "Branch to deploy"
+        required: true
+        default: "main"
 
-# jobs:
-#   ci:
-#     runs-on: ubuntu-latest
+# Define workflow jobs.
+jobs:
+  # Single deployment job.
+  deploy:
+    # Display name for this job.
+    name: Build and deploy
 
-#     steps:
-#       - name: Checkout
-#         uses: actions/checkout@v4
+    # Use GitHub-hosted Ubuntu runner.
+    runs-on: ubuntu-latest
 
-#       - name: Setup Node
-#         uses: actions/setup-node@v4
-#         with:
-#           node-version: 20
-#           cache: npm
+    # Steps run in order.
+    steps:
+      # Checkout the selected branch.
+      - name: Checkout selected branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
 
-#       - name: Install dependencies
-#         run: npm ci
+      # Configure AWS credentials from GitHub Secrets.
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-#       - name: Syntax check
-#         run: npm run check
+      # Log in Docker to Amazon ECR.
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
 
-#       - name: Run tests
-#         run: npm test
+      # Build Docker image and push it to ECR.
+      - name: Build and push Docker image
+        env:
+          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+          ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ github.event.inputs.branch }}-${{ github.sha }}
+        run: |
+          # Replace slash in branch names so Docker tags stay valid.
+          SAFE_TAG=$(echo "$IMAGE_TAG" | tr '/' '-')
 
-#   deploy:
-#     needs: ci
-#     if: github.event_name == 'push'
-#     runs-on: ubuntu-latest
+          # Build the full ECR image URI.
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$SAFE_TAG"
 
-#     steps:
-#       - name: Deploy on EC2 over SSH
-#         uses: appleboy/ssh-action@v1.2.0
-#         with:
-#           host: ${{ secrets.EC2_HOST }}
-#           username: ${{ secrets.EC2_USER }}
-#           key: ${{ secrets.EC2_SSH_KEY }}
-#           script: |
-#             cd "${{ secrets.EC2_APP_DIR }}"
-#             git pull origin main
-#             docker compose up -d --build
-#             docker image prune -f
+          # Build the Docker image from the repo Dockerfile.
+          docker build -t "$IMAGE_URI" .
+
+          # Push the Docker image to ECR.
+          docker push "$IMAGE_URI"
+
+          # Share IMAGE_URI with later workflow steps.
+          echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
+
+      # Prepare deployment files for copying to EC2.
+      - name: Prepare deployment files
+        run: |
+          # Create a temporary deployment package folder.
+          mkdir -p deploy-package
+
+          # Copy production Compose file into the package.
+          cp docker-compose.prod.yml deploy-package/docker-compose.prod.yml
+
+          # Copy Nginx config folder into the package.
+          cp -r nginx deploy-package/nginx
+
+      # Copy deployment files to the EC2 instance.
+      - name: Copy deployment files to EC2
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: "deploy-package/*"
+          target: "/tmp/dummy-node-backend"
+
+      # Run deployment commands on the EC2 instance.
+      - name: Deploy on EC2
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          IMAGE_URI: ${{ env.IMAGE_URI }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          ECR_REGISTRY: ${{ secrets.ECR_REGISTRY }}
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          envs: IMAGE_URI,AWS_REGION,ECR_REGISTRY
+          script: |
+            # Stop deployment immediately if any command fails.
+            set -e
+
+            # Create the app deployment directory.
+            sudo mkdir -p /opt/dummy-node-backend
+
+            # Copy uploaded deployment files into the app directory.
+            sudo cp -r /tmp/dummy-node-backend/deploy-package/* /opt/dummy-node-backend/
+
+            # Give ubuntu user ownership of the app directory.
+            sudo chown -R ubuntu:ubuntu /opt/dummy-node-backend
+
+            # Move into the app deployment directory.
+            cd /opt/dummy-node-backend
+
+            # Log Docker into ECR from the EC2 server.
+            aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+            # Write the image URI for Docker Compose.
+            echo "IMAGE_URI=$IMAGE_URI" > .env
+
+            # Pull the latest pushed image from ECR.
+            docker compose -f docker-compose.prod.yml pull
+
+            # Start or update containers in the background.
+            docker compose -f docker-compose.prod.yml up -d
+
+            # Remove unused old Docker images.
+            docker image prune -f

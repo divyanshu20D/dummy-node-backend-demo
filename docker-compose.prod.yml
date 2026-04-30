@@ -1,0 +1,103 @@
+# Define all production containers.
+services:
+  # Node.js API service.
+  app:
+    # Use the image built and pushed by GitHub Actions.
+    image: ${IMAGE_URI}
+
+    # Give the container a predictable name.
+    container_name: dummy-node-backend-app
+
+    # Restart automatically unless manually stopped.
+    restart: unless-stopped
+
+    # Runtime environment variables for the app.
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      REDIS_URL: redis://redis:6379
+
+    # Start app only after Redis is healthy.
+    depends_on:
+      redis:
+        condition: service_healthy
+
+    # Attach app to the private Docker network.
+    networks:
+      - app-network
+
+    # Check whether the app is responding.
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000' + (process.env.HEALTH_PATH || '/')).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # Redis service used by the app.
+  redis:
+    # Use the official lightweight Redis image.
+    image: redis:7-alpine
+
+    # Give the Redis container a predictable name.
+    container_name: dummy-node-backend-redis
+
+    # Restart automatically unless manually stopped.
+    restart: unless-stopped
+
+    # Enable append-only persistence for Redis.
+    command: ["redis-server", "--appendonly", "yes"]
+
+    # Persist Redis data outside the container.
+    volumes:
+      - redis-data:/data
+
+    # Attach Redis to the private Docker network.
+    networks:
+      - app-network
+
+    # Check whether Redis is responding.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # Nginx reverse proxy service.
+  nginx:
+    # Use the official lightweight Nginx image.
+    image: nginx:1.27-alpine
+
+    # Give the Nginx container a predictable name.
+    container_name: dummy-node-backend-nginx
+
+    # Restart automatically unless manually stopped.
+    restart: unless-stopped
+
+    # Expose HTTP traffic publicly on EC2 port 80.
+    ports:
+      - "80:80"
+
+    # Mount Nginx config into the container as read-only.
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+
+    # Start Nginx only after the app is healthy.
+    depends_on:
+      app:
+        condition: service_healthy
+
+    # Attach Nginx to the private Docker network.
+    networks:
+      - app-network
+
+# Define persistent Docker volumes.
+volumes:
+  # Store Redis data across container restarts.
+  redis-data:
+
+# Define private Docker networks.
+networks:
+  # Private network shared by app, Redis, and Nginx.
+  app-network:
+    driver: bridge

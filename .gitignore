@@ -5,5 +5,9 @@ npm-debug.log*
 coverage/
 dist/
 build/
+*.tar
+*.tar.gz
+*.tgz
+*.img
 .idea/
 .vscode/
