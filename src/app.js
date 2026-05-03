@@ -9,7 +9,9 @@ function createApp() {
 
   app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
   app.use(express.json());
-  app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
+  app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev', {
+    skip: (req) => req.path === '/health'
+  }));
 
   app.use('/', routes);
 
